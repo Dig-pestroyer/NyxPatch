@@ -1,2 +1,2 @@
 # NyxPatch
-Minecraft Server Mod Uodate Checker
+Minecraft Server Mod Update Checker
