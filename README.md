@@ -25,7 +25,7 @@ A command-line tool for checking and updating Minecraft mods from both Modrinth 
 
 1. Clone this repository or download the source code:
    ```
-   git clone https://github.com/yourusername/nyxpatcher.git
+   git clone https://github.com/Dig-pestroyer/nyxpatcher.git
    cd nyxpatcher
    ```
 
