@@ -6,12 +6,28 @@ checking for updates, and downloading newer versions.
 """
 
 import os
+import sys
 import json
 import logging
 import datetime
 from typing import Dict, List, Any, Optional, Set, Tuple
 from pathlib import Path
 from tqdm import tqdm
+
+
+class TqdmLoggingHandler(logging.Handler):
+    """
+    Custom logging handler that writes messages using tqdm.write().
+    This prevents progress bars from being broken by log messages.
+    """
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            # Use tqdm.write which respects progress bars
+            tqdm.write(msg)
+            self.flush()
+        except Exception:
+            self.handleError(record)
 
 from data.api.modrinth import ModrinthProvider
 from data.api.curseforge import CurseForgeProvider
@@ -70,20 +86,21 @@ class ModUpdateChecker:
         self._configure_console_logging()
         
     def _configure_console_logging(self) -> None:
-        """Configure logging to reduce console clutter."""
+        """Configure logging to reduce console clutter and preserve progress bars."""
         # Get the root logger
         root_logger = logging.getLogger()
         
-        # Configure all existing handlers to minimize console output
+        # Remove existing console handlers
         for handler in list(root_logger.handlers):
             if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
-                # Only show ERROR and CRITICAL in console
-                handler.setLevel(logging.ERROR)
-                
-                # Also adjust formatter to be more concise if possible
-                if handler.formatter:
-                    compact_format = logging.Formatter('%(levelname)s: %(message)s')
-                    handler.setFormatter(compact_format)
+                root_logger.removeHandler(handler)
+        
+        # Add a new tqdm-compatible console handler
+        tqdm_handler = TqdmLoggingHandler()
+        tqdm_handler.setLevel(logging.ERROR)  # Only show ERROR and CRITICAL in console
+        compact_format = logging.Formatter('%(levelname)s: %(message)s')
+        tqdm_handler.setFormatter(compact_format)
+        root_logger.addHandler(tqdm_handler)
     
     def _init_providers(self) -> None:
         """Initialize API providers based on configuration."""
@@ -119,13 +136,14 @@ class ModUpdateChecker:
         
         # Create a scanning progress bar with status information
         scan_bar = tqdm(
-            desc="📁 Scanning directories", 
+            desc="📁 Scan", 
             total=len(mod_dirs),
             unit="dir", 
-            bar_format="{desc} |{bar}| {percentage:3.0f}% ({n_fmt}/{total_fmt})",
+            bar_format="{desc}: {percentage:3.0f}% |{bar}| {n_fmt}/{total_fmt}",
             position=0,
             leave=False,  # Don't leave the bar after completion
-            ncols=80  # Fixed width to prevent line wrapping
+            ncols=60,  # Further reduced width to prevent line wrapping
+            file=sys.stdout  # Explicitly set output to stdout
         )
         
         try:
@@ -138,15 +156,20 @@ class ModUpdateChecker:
                 
                 # Only update the description when the mod count changes significantly (every 5 mods)
                 if total_mods % 5 == 0 or total_mods == 1:
-                    scan_bar.set_description(f"📁 Scanning ({total_mods} mods found)")
+                    scan_bar.set_description(f"📁 {total_mods}m")
                 scan_bar.update(1)
         finally:
+            # Make sure to clear the current line and close the bar properly
+            scan_bar.clear()
             scan_bar.close()
+            print("", end="\r", flush=True)  # Ensure the line is cleared
+            print("", flush=True)  # Add a blank line after the progress bar
             
         # No mods found
         if not mod_files:
             self.logger.warning("No mod files found in configured directories")
             tqdm.write("\nNo mod files found in the configured directories.")
+            print("", end="\r", flush=True)  # Ensure the line is cleared
             return []
             
         # Track processed files for cache cleanup
@@ -158,12 +181,13 @@ class ModUpdateChecker:
         # Create a processing progress bar with update counter
         process_bar = tqdm(
             mod_files,
-            desc=f"🔍 Checking {total_mods} mods (0 updates)",
+            desc=f"🔍 {total_mods}m",
             unit="mod",
-            bar_format="{desc} |{bar}| {percentage:3.0f}% ({n_fmt}/{total_fmt})",
+            bar_format="{desc} [{n_fmt}/{total_fmt}] {percentage:3.0f}% |{bar}|",
             position=0,
-            leave=False,  # Don't leave the bar after completion
-            ncols=80  # Fixed width to prevent line wrapping
+            leave=True,  # Leave the final bar visible after completion
+            ncols=60,  # Further reduced width to prevent line wrapping
+            file=sys.stdout  # Explicitly set output to stdout
         )
         
         # Track the last update count to only update description when it changes
@@ -203,13 +227,21 @@ class ModUpdateChecker:
                         if len(updates) != last_update_count:
                             last_update_count = len(updates)
                             process_bar.set_description(
-                                f"🔍 Checking {total_mods} mods ({len(updates)} updates)"
+                                f"🔍 {total_mods}m/{len(updates)}u"
                             )
                 except Exception as e:
+                    # Log error without breaking the progress bar
+                    process_bar.clear()  # Clear the current line
                     self.logger.error(f"Error processing {file_path}: {str(e)}")
+                    # Resume the progress bar
+                    process_bar.refresh()
         
         finally:
+            # Make sure to clear and close the bar properly
+            process_bar.clear()
             process_bar.close()
+            print("", end="\r", flush=True)  # Ensure the line is cleared
+            print("", flush=True)  # Add a blank line after the progress bar
             
         # Clean up cache if needed
         self.cache.clean_up(processed_files)
@@ -464,12 +496,13 @@ class ModUpdateChecker:
         # Create download progress bar
         download_bar = tqdm(
             updates, 
-            desc="⬇️ Downloading updates", 
+            desc="⬇️ DL", 
             unit="mod", 
             position=0, 
-            leave=False,
-            bar_format="{desc} |{bar}| {percentage:3.0f}% ({n_fmt}/{total_fmt})",
-            ncols=80  # Fixed width to prevent line wrapping
+            leave=True,  # Leave the bar visible after completion
+            bar_format="{desc}: {percentage:3.0f}% |{bar}| {n_fmt}/{total_fmt}",
+            ncols=60,  # Further reduced width to prevent line wrapping
+            file=sys.stdout  # Explicitly set output to stdout
         )
         
         try:
@@ -482,7 +515,10 @@ class ModUpdateChecker:
                 latest_version = update["latest_version"]
                 
                 if provider not in self.providers:
+                    # Log error without breaking the progress bar
+                    download_bar.clear()  # Clear the current line
                     self.logger.error(f"Provider {provider} not available for {mod_id}")
+                    download_bar.refresh()  # Resume the progress bar
                     continue
                     
                 # Generate output filename
@@ -503,10 +539,17 @@ class ModUpdateChecker:
                     self.logger.debug(f"Successfully downloaded {mod_id} v{latest_version}")
                     successful_downloads.append(update)
                 else:
+                    # Log error without breaking the progress bar
+                    download_bar.clear()  # Clear the current line
                     self.logger.error(f"Failed to download {mod_id} v{latest_version}")
+                    download_bar.refresh()  # Resume the progress bar
                 
         finally:
+            # Make sure to clear and close the bar properly
+            download_bar.clear()
             download_bar.close()
+            print("", end="\r", flush=True)  # Ensure the line is cleared
+            print("", flush=True)  # Add a blank line after the progress bar
             
         return successful_downloads
     
