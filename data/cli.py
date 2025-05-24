@@ -12,6 +12,36 @@ from data.config import Config
 from data.cache.manager import ModCache
 from data.checker import ModUpdateChecker
 from data.utils.logging import setup_logging, get_logger
+from data.__version__ import (
+    __version__,
+    __author__,
+    __license__,
+    __description__,
+    __release_date__,
+    get_version_info,
+    PACKAGE_NAME,
+    REPOSITORY_URL
+)
+
+
+def display_version_info(verbose: bool = False) -> None:
+    """
+    Display version information to the console.
+    
+    Args:
+        verbose: Whether to display detailed version information
+    """
+    version_info = get_version_info()
+    
+    print(f"{PACKAGE_NAME} v{__version__}")
+    print(f"Copyright © 2025 {__author__}")
+    print(f"License: {__license__}")
+    
+    if verbose:
+        print("\nVersion Information:")
+        print(f"  Release Date: {__release_date__}")
+        print(f"  Description: {__description__}")
+        print(f"  Repository: {REPOSITORY_URL}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -22,7 +52,7 @@ def parse_args() -> argparse.Namespace:
         Parsed arguments
     """
     parser = argparse.ArgumentParser(
-        description="Check Minecraft mods for updates",
+        description=f"{PACKAGE_NAME} v{__version__} - Check Minecraft mods for updates",
         epilog="Use --help for more information."
     )
     
@@ -57,6 +87,16 @@ def parse_args() -> argparse.Namespace:
         action="store_true", 
         help="Automatically download all available updates without prompting"
     )
+    parser.add_argument(
+        "--version", 
+        action="store_true", 
+        help="Display version information and exit"
+    )
+    parser.add_argument(
+        "--version-verbose", 
+        action="store_true", 
+        help="Display detailed version information and exit"
+    )
     
     return parser.parse_args()
 
@@ -71,11 +111,16 @@ def run() -> int:
     # Parse command-line arguments
     args = parse_args()
     
+    # Check if version display is requested
+    if args.version or args.version_verbose:
+        display_version_info(verbose=args.version_verbose)
+        return 0
+    
     # Setup logging
     setup_logging(debug_mode=args.debug)
     logger = get_logger(__name__)
     
-    logger.info("Mod Update Checker starting...")
+    logger.info(f"{PACKAGE_NAME} v{__version__} starting...")
     
     try:
         # Load configuration

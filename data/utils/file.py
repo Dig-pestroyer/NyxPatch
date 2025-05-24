@@ -23,7 +23,8 @@ from contextlib import contextmanager
 BUFFER_SIZE = 65536  # 64KB chunks for file reading
 TEMP_SUFFIX = ".download.tmp"
 BACKUP_SUFFIX = ".backup"
-USER_AGENT = "Mozilla/5.0 MinecraftModUpdater/1.0"
+from data.__version__ import get_user_agent_string
+USER_AGENT = get_user_agent_string()
 MOD_EXTENSIONS = {".jar", ".zip"}
 META_INF_PATH = "META-INF/mods.toml"
 FABRIC_MOD_JSON = "fabric.mod.json"

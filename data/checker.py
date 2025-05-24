@@ -25,6 +25,14 @@ from data.utils.file import (
 from data.utils.version import compare_versions
 from data.config import Config
 from data.cache.manager import ModCache
+from data.__version__ import (
+    __version__,
+    __release_date__,
+    __author__,
+    __license__,
+    PACKAGE_NAME,
+    REPOSITORY_URL
+)
 
 
 class ModUpdateChecker:
@@ -413,8 +421,8 @@ class ModUpdateChecker:
             
             if success:
                 self.logger.debug(f"Successfully downloaded {mod_id} v{latest_version}")
+                successful_downloads.append(update)
             else:
-                self.logger.error(f"Failed to download {mod_id} v{latest_version}")
                 self.logger.error(f"Failed to download {mod_id} v{latest_version}")
                 
         return successful_downloads
@@ -474,10 +482,13 @@ class ModUpdateChecker:
             
             # Write report
             with open(report_file, 'w', encoding='utf-8') as f:
-                f.write("=== Minecraft Mod Update Report ===\n")
-                f.write(f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"=== {PACKAGE_NAME} Mod Update Report ===\n")
+                f.write(f"{PACKAGE_NAME} Version: {__version__} (Released: {__release_date__})\n")
+                f.write(f"Report Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
                 f.write(f"Minecraft Version: {self.config.minecraft_version}\n")
                 f.write(f"Mod Loader: {self.config.mod_loader}\n")
+                f.write(f"Repository: {REPOSITORY_URL}\n")
+                f.write(f"License: {__license__}\n")
                 f.write("\n")
                 
                 f.write(f"Found {len(updates)} mods with available updates:\n\n")
