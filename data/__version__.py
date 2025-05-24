@@ -8,8 +8,8 @@ import datetime
 from typing import Dict, Any, Tuple
 
 # Version information
-__version__ = "1.0.1"
-__release_date__ = "2025-05-23"
+__version__ = "1.0.2"
+__release_date__ = "2025-05-24"
 __author__ = "Minecraft Mod Update Checker Team"
 __license__ = "MIT"
 __description__ = "A tool for checking and updating Minecraft mods from Modrinth and CurseForge."
