@@ -96,16 +96,35 @@ class ModUpdateChecker:
             
         # Scan for mod files
         mod_files = []
-        print("Scanning mod directories...")
-        for mod_dir in tqdm(mod_dirs, desc="Scanning directories", unit="dir"):
+        total_mods = 0
+        
+        # Create a scanning progress bar with status information
+        scan_bar = tqdm(
+            desc="📁 Scanning directories", 
+            total=len(mod_dirs),
+            unit="dir", 
+            bar_format="{desc}: {percentage:3.0f}% |{bar}| {n_fmt}/{total_fmt} dirs [{elapsed}<{remaining}]",
+            position=0,
+            leave=True
+        )
+        
+        # Scan each directory
+        for mod_dir in mod_dirs:
             self.logger.debug(f"Scanning directory: {mod_dir}")
             found_files = find_mod_files(mod_dir)
-            self.logger.debug(f"Found {len(found_files)} mod files in {mod_dir}")
             mod_files.extend(found_files)
-        print(f"Found {len(mod_files)} total mod files across {len(mod_dirs)} directories")
+            total_mods += len(found_files)
             
+            # Update the description to show progress
+            scan_bar.set_description(f"📁 Scanning directories ({total_mods} mods found)")
+            scan_bar.update(1)
+            
+        scan_bar.close()
+            
+        # No mods found
         if not mod_files:
             self.logger.warning("No mod files found in configured directories")
+            print("No mod files found in the configured directories.")
             return []
             
         # Track processed files for cache cleanup
@@ -114,8 +133,18 @@ class ModUpdateChecker:
         # Find updates
         updates = []
         
-        print("Processing mod files...")
-        for file_path in tqdm(mod_files, desc="Checking mods", unit="mod"):
+        # Create a processing progress bar with update counter
+        process_bar = tqdm(
+            mod_files,
+            desc=f"🔍 Checking {total_mods} mods for updates (0 found)",
+            unit="mod",
+            bar_format="{desc}: {percentage:3.0f}% |{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]",
+            position=0,
+            leave=True
+        )
+        
+        # Process each mod file
+        for file_path in process_bar:
             normalized_path = normalize_path(file_path)
             processed_files.add(normalized_path)
             
@@ -142,6 +171,10 @@ class ModUpdateChecker:
                 # If an update is available, add it to the list
                 if update_info and update_info.get("update_available"):
                     updates.append(update_info)
+                    # Update the progress bar description with the count
+                    process_bar.set_description(
+                        f"🔍 Checking {total_mods} mods for updates ({len(updates)} found)"
+                    )
             except Exception as e:
                 self.logger.error(f"Error processing {file_path}: {str(e)}")
         
@@ -152,9 +185,9 @@ class ModUpdateChecker:
         # Print a summary of the update check
         update_count = len(updates)
         if update_count > 0:
-            print(f"\nFound {update_count} mod{'' if update_count == 1 else 's'} with available updates")
+            print(f"✅ Found {update_count} mod{'' if update_count == 1 else 's'} with available updates")
         else:
-            print("\nNo mod updates available")
+            print("✅ All mods are up to date")
         
         return updates
     
