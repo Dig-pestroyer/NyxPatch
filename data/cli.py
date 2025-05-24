@@ -118,8 +118,15 @@ def run() -> int:
     
     # Setup logging
     setup_logging(debug_mode=args.debug)
-    logger = get_logger(__name__)
     
+    # Configure console handlers to minimize output
+    root_logger = logging.getLogger()
+    for handler in list(root_logger.handlers):
+        if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
+            # Only show ERROR and CRITICAL in console
+            handler.setLevel(logging.ERROR)
+    
+    logger = get_logger(__name__)
     logger.info(f"{PACKAGE_NAME} v{__version__} starting...")
     
     try:

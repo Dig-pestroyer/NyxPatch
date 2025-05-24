@@ -66,6 +66,25 @@ class ModUpdateChecker:
         self.providers = {}
         self._init_providers()
         
+        # Configure logging for cleaner console output
+        self._configure_console_logging()
+        
+    def _configure_console_logging(self) -> None:
+        """Configure logging to reduce console clutter."""
+        # Get the root logger
+        root_logger = logging.getLogger()
+        
+        # Configure all existing handlers to minimize console output
+        for handler in list(root_logger.handlers):
+            if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
+                # Only show ERROR and CRITICAL in console
+                handler.setLevel(logging.ERROR)
+                
+                # Also adjust formatter to be more concise if possible
+                if handler.formatter:
+                    compact_format = logging.Formatter('%(levelname)s: %(message)s')
+                    handler.setFormatter(compact_format)
+    
     def _init_providers(self) -> None:
         """Initialize API providers based on configuration."""
         # Initialize Modrinth provider (always available)
@@ -96,16 +115,38 @@ class ModUpdateChecker:
             
         # Scan for mod files
         mod_files = []
-        print("Scanning mod directories...")
-        for mod_dir in tqdm(mod_dirs, desc="Scanning directories", unit="dir"):
-            self.logger.debug(f"Scanning directory: {mod_dir}")
-            found_files = find_mod_files(mod_dir)
-            self.logger.debug(f"Found {len(found_files)} mod files in {mod_dir}")
-            mod_files.extend(found_files)
-        print(f"Found {len(mod_files)} total mod files across {len(mod_dirs)} directories")
+        total_mods = 0
+        
+        # Create a scanning progress bar with status information
+        scan_bar = tqdm(
+            desc="📁 Scanning directories", 
+            total=len(mod_dirs),
+            unit="dir", 
+            bar_format="{desc} |{bar}| {percentage:3.0f}% ({n_fmt}/{total_fmt})",
+            position=0,
+            leave=False,  # Don't leave the bar after completion
+            ncols=80  # Fixed width to prevent line wrapping
+        )
+        
+        try:
+            # Scan each directory
+            for mod_dir in mod_dirs:
+                self.logger.debug(f"Scanning directory: {mod_dir}")
+                found_files = find_mod_files(mod_dir)
+                mod_files.extend(found_files)
+                total_mods += len(found_files)
+                
+                # Only update the description when the mod count changes significantly (every 5 mods)
+                if total_mods % 5 == 0 or total_mods == 1:
+                    scan_bar.set_description(f"📁 Scanning ({total_mods} mods found)")
+                scan_bar.update(1)
+        finally:
+            scan_bar.close()
             
+        # No mods found
         if not mod_files:
             self.logger.warning("No mod files found in configured directories")
+            tqdm.write("\nNo mod files found in the configured directories.")
             return []
             
         # Track processed files for cache cleanup
@@ -114,37 +155,62 @@ class ModUpdateChecker:
         # Find updates
         updates = []
         
-        print("Processing mod files...")
-        for file_path in tqdm(mod_files, desc="Checking mods", unit="mod"):
-            normalized_path = normalize_path(file_path)
-            processed_files.add(normalized_path)
-            
-            try:
-                # Extract metadata from the mod file
-                mod_metadata = self._get_mod_metadata(normalized_path)
-                
-                # Skip files without a mod ID
-                if not mod_metadata["mod_id"]:
-                    self.logger.warning(f"Could not determine mod ID for {file_path}")
-                    continue
-                    
-                # Skip ignored mods
-                if mod_metadata["mod_id"] in self.config.ignore_mods:
-                    self.logger.info(f"Skipping ignored mod: {mod_metadata['mod_id']}")
-                    continue
-                    
-                # Get project IDs from providers
-                project_ids = self._get_project_ids(mod_metadata)
-                
-                # Check for updates from providers
-                update_info = self._check_for_update(mod_metadata, project_ids)
-                
-                # If an update is available, add it to the list
-                if update_info and update_info.get("update_available"):
-                    updates.append(update_info)
-            except Exception as e:
-                self.logger.error(f"Error processing {file_path}: {str(e)}")
+        # Create a processing progress bar with update counter
+        process_bar = tqdm(
+            mod_files,
+            desc=f"🔍 Checking {total_mods} mods (0 updates)",
+            unit="mod",
+            bar_format="{desc} |{bar}| {percentage:3.0f}% ({n_fmt}/{total_fmt})",
+            position=0,
+            leave=False,  # Don't leave the bar after completion
+            ncols=80  # Fixed width to prevent line wrapping
+        )
         
+        # Track the last update count to only update description when it changes
+        last_update_count = 0
+        
+        try:
+            # Process each mod file
+            for file_path in process_bar:
+                normalized_path = normalize_path(file_path)
+                processed_files.add(normalized_path)
+                
+                try:
+                    # Extract metadata from the mod file
+                    mod_metadata = self._get_mod_metadata(normalized_path)
+                    
+                    # Skip files without a mod ID
+                    if not mod_metadata["mod_id"]:
+                        # Log this warning only to the file, not to console
+                        self.logger.warning(f"Could not determine mod ID for {file_path}")
+                        continue
+                        
+                    # Skip ignored mods
+                    if mod_metadata["mod_id"] in self.config.ignore_mods:
+                        self.logger.info(f"Skipping ignored mod: {mod_metadata['mod_id']}")
+                        continue
+                        
+                    # Get project IDs from providers
+                    project_ids = self._get_project_ids(mod_metadata)
+                    
+                    # Check for updates from providers
+                    update_info = self._check_for_update(mod_metadata, project_ids)
+                    
+                    # If an update is available, add it to the list
+                    if update_info and update_info.get("update_available"):
+                        updates.append(update_info)
+                        # Only update the description when the update count changes
+                        if len(updates) != last_update_count:
+                            last_update_count = len(updates)
+                            process_bar.set_description(
+                                f"🔍 Checking {total_mods} mods ({len(updates)} updates)"
+                            )
+                except Exception as e:
+                    self.logger.error(f"Error processing {file_path}: {str(e)}")
+        
+        finally:
+            process_bar.close()
+            
         # Clean up cache if needed
         self.cache.clean_up(processed_files)
         self.cache.save()
@@ -152,9 +218,9 @@ class ModUpdateChecker:
         # Print a summary of the update check
         update_count = len(updates)
         if update_count > 0:
-            print(f"\nFound {update_count} mod{'' if update_count == 1 else 's'} with available updates")
+            tqdm.write(f"✅ Found {update_count} mod{'' if update_count == 1 else 's'} with available updates")
         else:
-            print("\nNo mod updates available")
+            tqdm.write("✅ All mods are up to date")
         
         return updates
     
@@ -393,38 +459,55 @@ class ModUpdateChecker:
             
         successful_downloads = []
         
-        print(f"Downloading {len(updates)} mod updates...")
-        for update in tqdm(updates, desc="Downloading updates", unit="mod"):
-            mod_id = update["mod_id"]
-            mod_name = update["mod_name"]
-            provider = update["provider"]
-            version_info = update["version_info"]
-            latest_version = update["latest_version"]
-            
-            if provider not in self.providers:
-                self.logger.error(f"Provider {provider} not available for {mod_id}")
-                continue
+        tqdm.write(f"Downloading {len(updates)} mod updates...")
+        
+        # Create download progress bar
+        download_bar = tqdm(
+            updates, 
+            desc="⬇️ Downloading updates", 
+            unit="mod", 
+            position=0, 
+            leave=False,
+            bar_format="{desc} |{bar}| {percentage:3.0f}% ({n_fmt}/{total_fmt})",
+            ncols=80  # Fixed width to prevent line wrapping
+        )
+        
+        try:
+            # Process each update
+            for update in download_bar:
+                mod_id = update["mod_id"]
+                mod_name = update["mod_name"]
+                provider = update["provider"]
+                version_info = update["version_info"]
+                latest_version = update["latest_version"]
                 
-            # Generate output filename
-            output_filename = self._generate_output_filename(mod_id, mod_name, latest_version)
-            output_path = os.path.join(download_dir, output_filename)
-            
-            self.logger.debug(f"Downloading {mod_id} v{latest_version} to {output_path}")
-            
-            if dry_run:
-                self.logger.info(f"[DRY RUN] Would download {mod_id} v{latest_version}")
-                successful_downloads.append(update)
-                continue
+                if provider not in self.providers:
+                    self.logger.error(f"Provider {provider} not available for {mod_id}")
+                    continue
+                    
+                # Generate output filename
+                output_filename = self._generate_output_filename(mod_id, mod_name, latest_version)
+                output_path = os.path.join(download_dir, output_filename)
                 
-            # Perform the download
-            success = self.providers[provider].download_mod(version_info, output_path)
-            
-            if success:
-                self.logger.debug(f"Successfully downloaded {mod_id} v{latest_version}")
-                successful_downloads.append(update)
-            else:
-                self.logger.error(f"Failed to download {mod_id} v{latest_version}")
+                self.logger.debug(f"Downloading {mod_id} v{latest_version} to {output_path}")
                 
+                if dry_run:
+                    self.logger.info(f"[DRY RUN] Would download {mod_id} v{latest_version}")
+                    successful_downloads.append(update)
+                    continue
+                    
+                # Perform the download
+                success = self.providers[provider].download_mod(version_info, output_path)
+                
+                if success:
+                    self.logger.debug(f"Successfully downloaded {mod_id} v{latest_version}")
+                    successful_downloads.append(update)
+                else:
+                    self.logger.error(f"Failed to download {mod_id} v{latest_version}")
+                
+        finally:
+            download_bar.close()
+            
         return successful_downloads
     
     def _generate_output_filename(
@@ -622,8 +705,8 @@ class ModUpdateChecker:
             return []
             
         try:
-            print("\n=== Available Mod Updates ===\n")
-            print(f"Found {len(updates)} mods with available updates:\n")
+            tqdm.write("\n=== Available Mod Updates ===\n")
+            tqdm.write(f"Found {len(updates)} mods with available updates:\n")
             
             # Display updates in a more concise format
             for i, update in enumerate(updates, 1):
@@ -631,61 +714,81 @@ class ModUpdateChecker:
                 current_version = update["current_version"]
                 latest_version = update["latest_version"]
                 
-                print(f"{i}. {mod_name} [{current_version} → {latest_version}]")
+                tqdm.write(f"{i}. {mod_name} [{current_version} → {latest_version}]")
                 
             # Menu options
-            print("\nOptions:")
-            print("a - Download all updates")
-            print("n - Download none")
-            print("s - Select specific updates (comma-separated numbers)")
+            tqdm.write("\nOptions:")
+            tqdm.write("a - Download all updates")
+            tqdm.write("n - Download none (default if empty)")
+            tqdm.write("s - Select specific updates (comma-separated numbers)")
+            tqdm.write("Press Ctrl+C at any time to cancel")
+            
+            # Add a small delay before showing input prompt to make sure all output is displayed
+            import time
+            time.sleep(0.5)
             
             # Get user input
             while True:
-                choice = input("\nEnter your choice: ").strip().lower()
-                
-                if choice == 'a':
-                    print(f"Selected all {len(updates)} updates for download")
-                    return updates
-                elif choice == 'n':
-                    print("No updates selected")
-                    return []
-                elif choice == 's':
-                    # Get selection numbers
-                    while True:
-                        selection = input("Enter update numbers (comma-separated): ").strip()
-                        try:
-                            # Parse selection numbers
-                            if not selection:
-                                print("No updates selected")
-                                return []
-                                
-                            selected_indices = []
-                            for part in selection.split(','):
-                                part = part.strip()
-                                if not part:
-                                    continue
+                try:
+                    # Make the prompt more visible with a newline
+                    choice = input("\nEnter your choice: ").strip().lower()
+                    
+                    # Treat empty input as 'n'
+                    if not choice:
+                        tqdm.write("No updates selected (empty input)")
+                        return []
+                    
+                    if choice == 'a':
+                        tqdm.write(f"Selected all {len(updates)} updates for download")
+                        return updates
+                    elif choice == 'n':
+                        tqdm.write("No updates selected")
+                        return []
+                    elif choice == 's':
+                        # Get selection numbers
+                        while True:
+                            try:
+                                selection = input("Enter update numbers (comma-separated): ").strip()
+                                # Parse selection numbers
+                                if not selection:
+                                    tqdm.write("No updates selected")
+                                    return []
                                     
-                                num = int(part)
-                                if 1 <= num <= len(updates):
-                                    selected_indices.append(num - 1)  # Convert to zero-based index
+                                selected_indices = []
+                                for part in selection.split(','):
+                                    part = part.strip()
+                                    if not part:
+                                        continue
+                                        
+                                    num = int(part)
+                                    if 1 <= num <= len(updates):
+                                        selected_indices.append(num - 1)  # Convert to zero-based index
+                                    else:
+                                        raise ValueError(f"Invalid selection: {num}")
+                                        
+                                # Create list of selected updates
+                                selected_updates = [updates[i] for i in selected_indices]
+                                
+                                if not selected_updates:
+                                    tqdm.write("No updates selected")
                                 else:
-                                    raise ValueError(f"Invalid selection: {num}")
+                                    tqdm.write(f"Selected {len(selected_updates)} updates for download")
                                     
-                            # Create list of selected updates
-                            selected_updates = [updates[i] for i in selected_indices]
+                                return selected_updates
                             
-                            if not selected_updates:
-                                print("No updates selected")
-                            else:
-                                print(f"Selected {len(selected_updates)} updates for download")
-                                
-                            return selected_updates
-                            
-                        except ValueError as e:
-                            print(f"Invalid input: {str(e)}")
-                else:
-                    print("Invalid choice, please try again")
+                            except ValueError as e:
+                                tqdm.write(f"Invalid input: {str(e)}")
+                            except KeyboardInterrupt:
+                                # Handle Ctrl+C gracefully during selection
+                                tqdm.write("\nSelection cancelled. No updates selected.")
+                                return []
+                    else:
+                        tqdm.write("Invalid choice, please try again (a/n/s or empty for none)")
+                except KeyboardInterrupt:
+                    # Handle Ctrl+C gracefully during main menu
+                    tqdm.write("\nOperation cancelled. No updates selected.")
+                    return []
         except Exception as e:
             self.logger.error(f"Error in interactive menu: {str(e)}")
-            print("\nError displaying interactive menu. No updates will be downloaded.")
+            tqdm.write("\nError displaying interactive menu. No updates will be downloaded.")
             return []
